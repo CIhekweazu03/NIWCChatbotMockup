@@ -9,3 +9,4 @@ Basic chatbot implementation using AWS Bedrock and Streamlit.
 1. Configure AWS credentials
 2. Install requirements: `pip install -r requirements.txt`
 3. Run: `streamlit run chatbot_app.py`
+# NIWCChatbotMockup
