@@ -1,16 +1,21 @@
 import boto3
 import json
 from typing import List, Dict, Optional
+from io import BytesIO
+import PyPDF2
 
 class BedrockChatbot:
     """
-    A basic chatbot implementation using AWS Bedrock's Claude model.
-    Maintains conversation history and handles message interactions.
+    Enhanced chatbot implementation using AWS Bedrock's Claude model.
+    Incorporates guidance documents from S3 for context-aware responses.
     """
     
-    def __init__(self, model_id: str = 'us.anthropic.claude-3-5-sonnet-20241022-v2:0'):
+    def __init__(
+        self,
+        model_id: str = 'us.anthropic.claude-3-5-sonnet-20241022-v2:0'
+    ):
         """
-        Initialize the chatbot with AWS Bedrock client and conversation settings.
+        Initialize the chatbot with AWS Bedrock client.
         
         Args:
             model_id (str): The Bedrock model identifier to use for chat
@@ -18,6 +23,39 @@ class BedrockChatbot:
         self.bedrock = boto3.client('bedrock-runtime', region_name='us-east-1')
         self.model_id = model_id
         self.conversation_history: List[Dict[str, str]] = []
+        self.has_sent_initial_context = False
+        
+        # Get all document content from S3
+        s3 = boto3.client('s3')
+        bucket_name = "guides-and-context-for-chatbot"
+        
+        try:
+            response = s3.list_objects_v2(Bucket=bucket_name)
+            self.guidance_info = []
+            
+            for obj in response.get('Contents', []):
+                try:
+                    key = obj['Key']
+                    if key.lower().endswith('.pdf'):
+                        # Handle PDF files
+                        pdf_content = s3.get_object(Bucket=bucket_name, Key=key)['Body'].read()
+                        pdf_reader = PyPDF2.PdfReader(BytesIO(pdf_content))
+                        text = ""
+                        for page in pdf_reader.pages:
+                            text += page.extract_text() + "\n"
+                        self.guidance_info.append(text)
+                    else:
+                        # Handle text files
+                        file_content = s3.get_object(Bucket=bucket_name, Key=key)['Body'].read().decode('utf-8')
+                        self.guidance_info.append(file_content)
+                except Exception as e:
+                    print(f"Warning: Could not process file {key}: {e}")
+                    continue
+                    
+            self.guidance_info = "\n\n".join(self.guidance_info)
+        except Exception as e:
+            print(f"Warning: Could not retrieve guidance documents: {e}")
+            self.guidance_info = ""
         
     def add_to_history(self, role: str, content: str) -> None:
         """
@@ -34,7 +72,7 @@ class BedrockChatbot:
     
     def get_response(self, user_input: str) -> Optional[str]:
         """
-        Get a response from the model for the user's input.
+        Get a context-aware response from the model for the user's input.
         
         Args:
             user_input (str): The user's message
@@ -42,15 +80,27 @@ class BedrockChatbot:
         Returns:
             Optional[str]: The model's response, or None if an error occurs
         """
-        # Add user's message to history
-        self.add_to_history("user", user_input)
-        
         try:
+            # For the first message, include the guidance information
+            if not self.has_sent_initial_context:
+                initial_prompt = f"""You are a helpful assistant with access to the following guidance information:
+
+{self.guidance_info}
+
+Please use this information when relevant to provide accurate and helpful responses. Be concise but thorough in your answers.
+
+User's question: {user_input}"""
+                self.add_to_history("user", initial_prompt)
+                self.has_sent_initial_context = True
+            else:
+                # For subsequent messages, just add the user input normally
+                self.add_to_history("user", user_input)
+            
             # Prepare the request body
             request_body = json.dumps({
                 "anthropic_version": "bedrock-2023-05-31",
                 "max_tokens": 50000,
-                "temperature": 0.7,  # Slightly higher temperature for more creative responses
+                "temperature": 0.7,
                 "messages": self.conversation_history
             })
             

@@ -21,7 +21,7 @@ def display_chat_messages() -> None:
 
 def process_user_message(user_message: str) -> None:
     """
-    Process a user message and get the chatbot's response.
+    Process a user message and get the chatbot's response with context indication.
     
     Args:
         user_message (str): The message from the user
@@ -33,11 +33,14 @@ def process_user_message(user_message: str) -> None:
     
     # Get chatbot response
     with st.chat_message("assistant"):
-        with st.spinner("Thinking..."):
+        with st.spinner("Retrieving relevant context and thinking..."):
             response = st.session_state.chatbot.get_response(user_message)
             if response:
+                # Show context indicator
+                st.caption("💡 Response includes guidance from our documentation")
+                # Show response
                 st.markdown(response)
-                # Add assistant's response to chat history
+                # Add to chat history
                 st.session_state.messages.append({"role": "assistant", "content": response})
             else:
                 st.error("I encountered an error processing your message. Please try again.")
